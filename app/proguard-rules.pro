@@ -1,0 +1,3 @@
+-keep class com.paulaik.labl.data.model.** { *; }
+-keepattributes *Annotation*
+-dontwarn okhttp3.**

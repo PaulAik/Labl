@@ -1,0 +1,10 @@
+## Copy this file to local.properties and fill in your values.
+## local.properties is gitignored and never committed.
+
+# Path to your Android SDK installation
+sdk.dir=/Users/yourname/Library/Android/sdk
+
+# Claude API key from https://console.anthropic.com
+# If set here the app will use it automatically without the in-app settings screen.
+# Leave blank to enter the key inside the app instead.
+CLAUDE_API_KEY=

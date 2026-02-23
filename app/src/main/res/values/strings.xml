@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Labl</string>
+    <string name="camera_permission_rationale">Camera access is required to identify appliance symbols in real time.</string>
+    <string name="api_key_hint">Enter your Claude API key (sk-ant-...)</string>
+    <string name="scanning">Scanning for symbols…</string>
+    <string name="no_symbols_found">No symbols detected</string>
+    <string name="tap_for_details">Tap a symbol card for details</string>
+</resources>
