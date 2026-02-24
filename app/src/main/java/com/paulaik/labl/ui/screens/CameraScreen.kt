@@ -37,6 +37,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.AddAPhoto
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -98,9 +99,11 @@ private fun LiveViewScreen(vm: CameraViewModel) {
     val isAnalysing by vm.isAnalysing.collectAsState()
     val errorMessage by vm.errorMessage.collectAsState()
     val apiKey by vm.apiKey.collectAsState()
+    val backendUrl by vm.backendUrl.collectAsState()
 
     var selectedSymbol by remember { mutableStateOf<Symbol?>(null) }
     var showSettings by remember { mutableStateOf(apiKey.isBlank()) }
+    var showTraining by remember { mutableStateOf(false) }
 
     // Build analyzer once; it references the latest apiKey via lambda
     val analyzer = remember { vm.buildAnalyzer() }
@@ -128,6 +131,7 @@ private fun LiveViewScreen(vm: CameraViewModel) {
         // ── Top bar ─────────────────────────────────────────────────
         TopBar(
             onSettingsTapped = { showSettings = true },
+            onTrainingTapped = { showTraining = true },
             modifier = Modifier
                 .align(Alignment.TopCenter)
                 .fillMaxWidth()
@@ -165,11 +169,20 @@ private fun LiveViewScreen(vm: CameraViewModel) {
     if (showSettings) {
         SettingsSheet(
             currentKey = apiKey,
-            onSave = { key ->
+            currentBackendUrl = backendUrl,
+            onSave = { key, url ->
                 vm.saveApiKey(key)
+                vm.saveBackendUrl(url)
                 showSettings = false
             },
             onDismiss = { showSettings = false }
+        )
+    }
+
+    if (showTraining) {
+        TrainingScreen(
+            backendUrl = backendUrl,
+            onDismiss = { showTraining = false }
         )
     }
 }
@@ -219,7 +232,11 @@ private fun startCamera(
 // ── Top bar ────────────────────────────────────────────────────────────────
 
 @Composable
-private fun TopBar(onSettingsTapped: () -> Unit, modifier: Modifier = Modifier) {
+private fun TopBar(
+    onSettingsTapped: () -> Unit,
+    onTrainingTapped: () -> Unit,
+    modifier: Modifier = Modifier
+) {
     Row(
         modifier = modifier
             .background(Color.Black.copy(alpha = 0.45f))
@@ -234,12 +251,21 @@ private fun TopBar(onSettingsTapped: () -> Unit, modifier: Modifier = Modifier) 
             fontSize = 22.sp,
             letterSpacing = 4.sp
         )
-        IconButton(onClick = onSettingsTapped) {
-            Icon(
-                imageVector = Icons.Default.Settings,
-                contentDescription = "Settings",
-                tint = Color.White.copy(alpha = 0.80f)
-            )
+        Row {
+            IconButton(onClick = onTrainingTapped) {
+                Icon(
+                    imageVector = Icons.Default.AddAPhoto,
+                    contentDescription = "Collect training data",
+                    tint = ScannerTeal.copy(alpha = 0.85f)
+                )
+            }
+            IconButton(onClick = onSettingsTapped) {
+                Icon(
+                    imageVector = Icons.Default.Settings,
+                    contentDescription = "Settings",
+                    tint = Color.White.copy(alpha = 0.80f)
+                )
+            }
         }
     }
 }

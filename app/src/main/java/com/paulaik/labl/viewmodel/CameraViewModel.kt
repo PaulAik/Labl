@@ -21,11 +21,16 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
     private val apiClient = ClaudeApiClient()
     private var analyzer: SymbolAnalyzer? = null
 
-    // Exposed API key as state for the settings screen
     val apiKey: StateFlow<String> = apiKeyStore.apiKey.stateIn(
         viewModelScope,
         SharingStarted.WhileSubscribed(5_000),
         ""
+    )
+
+    val backendUrl: StateFlow<String> = apiKeyStore.backendUrl.stateIn(
+        viewModelScope,
+        SharingStarted.WhileSubscribed(5_000),
+        "http://10.0.2.2:8080"
     )
 
     private val _analysisResult = MutableStateFlow<AnalysisResult?>(null)
@@ -67,6 +72,10 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
 
     fun saveApiKey(key: String) {
         viewModelScope.launch { apiKeyStore.save(key) }
+    }
+
+    fun saveBackendUrl(url: String) {
+        viewModelScope.launch { apiKeyStore.saveBackendUrl(url) }
     }
 
     fun clearError() {

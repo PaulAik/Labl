@@ -8,6 +8,7 @@ import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.Button
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
@@ -28,11 +29,13 @@ import androidx.compose.ui.unit.sp
 @Composable
 fun SettingsSheet(
     currentKey: String,
-    onSave: (String) -> Unit,
+    currentBackendUrl: String,
+    onSave: (apiKey: String, backendUrl: String) -> Unit,
     onDismiss: () -> Unit
 ) {
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     var keyDraft by remember { mutableStateOf(currentKey) }
+    var urlDraft by remember { mutableStateOf(currentBackendUrl) }
 
     ModalBottomSheet(
         onDismissRequest = onDismiss,
@@ -45,6 +48,7 @@ fun SettingsSheet(
                 .navigationBarsPadding()
                 .padding(horizontal = 24.dp, vertical = 12.dp)
         ) {
+            // ── Claude API Key ──────────────────────────────────────────
             Text(
                 text = "Claude API Key",
                 color = Color.White,
@@ -53,12 +57,12 @@ fun SettingsSheet(
             )
             Spacer(Modifier.height(6.dp))
             Text(
-                text = "Get your key at console.anthropic.com. It is stored locally on your device only.",
+                text = "Get your key at console.anthropic.com. Stored locally on device only.",
                 color = Color.White.copy(alpha = 0.60f),
                 fontSize = 13.sp,
                 lineHeight = 19.sp
             )
-            Spacer(Modifier.height(20.dp))
+            Spacer(Modifier.height(16.dp))
 
             OutlinedTextField(
                 value = keyDraft,
@@ -70,10 +74,41 @@ fun SettingsSheet(
                 label = { Text("API Key", color = Color.White.copy(alpha = 0.60f)) }
             )
 
-            Spacer(Modifier.height(20.dp))
+            Spacer(Modifier.height(24.dp))
+            HorizontalDivider(color = Color.White.copy(alpha = 0.08f))
+            Spacer(Modifier.height(24.dp))
+
+            // ── Training Backend URL ────────────────────────────────────
+            Text(
+                text = "Training Backend URL",
+                color = Color.White,
+                fontWeight = FontWeight.Bold,
+                fontSize = 18.sp
+            )
+            Spacer(Modifier.height(6.dp))
+            Text(
+                text = "Go backend that stores training images in S3. Use 10.0.2.2:8080 for an emulator pointing to localhost.",
+                color = Color.White.copy(alpha = 0.60f),
+                fontSize = 13.sp,
+                lineHeight = 19.sp
+            )
+            Spacer(Modifier.height(16.dp))
+
+            OutlinedTextField(
+                value = urlDraft,
+                onValueChange = { urlDraft = it },
+                modifier = Modifier.fillMaxWidth(),
+                placeholder = {
+                    Text("http://10.0.2.2:8080", color = Color.White.copy(alpha = 0.35f))
+                },
+                singleLine = true,
+                label = { Text("Backend URL", color = Color.White.copy(alpha = 0.60f)) }
+            )
+
+            Spacer(Modifier.height(24.dp))
 
             Button(
-                onClick = { onSave(keyDraft) },
+                onClick = { onSave(keyDraft, urlDraft) },
                 enabled = keyDraft.isNotBlank(),
                 modifier = Modifier.fillMaxWidth()
             ) {
