@@ -10,3 +10,7 @@
 *.keystore
 !debug.keystore
 google-services.json
+
+# Go build artifacts
+/backend/labl-backend
+backend/labels.json
