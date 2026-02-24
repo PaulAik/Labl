@@ -32,6 +32,11 @@ class SymbolAnalyzer(
     @Volatile private var lastAnalysisTs = 0L
     @Volatile private var busy = false
 
+    /** Reset the interval timer so the next incoming frame is analysed immediately. */
+    fun triggerNow() {
+        lastAnalysisTs = 0L
+    }
+
     override fun analyze(image: ImageProxy) {
         val now = System.currentTimeMillis()
         if (busy || now - lastAnalysisTs < intervalMs) {

@@ -76,7 +76,7 @@ class ClaudeApiClient {
             .put("content", JSONArray().put(imageContent).put(textContent))
 
         return JSONObject()
-            .put("model", "claude-opus-4-5")
+            .put("model", "claude-haiku-3-5")
             .put("max_tokens", 1024)
             .put("messages", JSONArray().put(message))
     }
@@ -90,8 +90,9 @@ class ClaudeApiClient {
 
         Log.d(TAG, "Claude response: $text")
 
-        // Extract the JSON block from the response
-        val jsonBlock = Regex("""\{[\s\S]*\}""").find(text)?.value
+        // Extract the JSON block – handle both raw JSON and markdown code fences
+        val jsonBlock = Regex("""```(?:json)?\s*(\{[\s\S]*?\})\s*```""").find(text)?.groupValues?.get(1)
+            ?: Regex("""\{[\s\S]*\}""").find(text)?.value
             ?: return AnalysisResult(emptyList())
 
         val parsed = JSONObject(jsonBlock)

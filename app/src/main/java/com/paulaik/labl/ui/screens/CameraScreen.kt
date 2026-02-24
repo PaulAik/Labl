@@ -6,6 +6,8 @@ import android.util.Size
 import androidx.camera.core.CameraSelector
 import androidx.camera.core.ImageAnalysis
 import androidx.camera.core.Preview
+import androidx.camera.core.resolutionselector.ResolutionSelector
+import androidx.camera.core.resolutionselector.ResolutionStrategy
 import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.camera.view.PreviewView
 import androidx.compose.animation.AnimatedVisibility
@@ -18,6 +20,8 @@ import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -25,6 +29,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
@@ -129,6 +134,16 @@ private fun LiveViewScreen(vm: CameraViewModel) {
                 .statusBarsPadding()
         )
 
+        // ── Scan Now button ─────────────────────────────────────────
+        ScanNowButton(
+            isAnalysing = isAnalysing,
+            onClick = { vm.triggerScan() },
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .navigationBarsPadding()
+                .padding(bottom = 88.dp)
+        )
+
         // ── Status bar at bottom ────────────────────────────────────
         StatusBar(
             isAnalysing = isAnalysing,
@@ -137,7 +152,8 @@ private fun LiveViewScreen(vm: CameraViewModel) {
             modifier = Modifier
                 .align(Alignment.BottomCenter)
                 .fillMaxWidth()
-                .padding(bottom = 32.dp, start = 20.dp, end = 20.dp)
+                .navigationBarsPadding()
+                .padding(bottom = 24.dp, start = 20.dp, end = 20.dp)
         )
     }
 
@@ -175,7 +191,16 @@ private fun startCamera(
         }
 
         val imageAnalysis = ImageAnalysis.Builder()
-            .setTargetResolution(Size(1280, 720))
+            .setResolutionSelector(
+                ResolutionSelector.Builder()
+                    .setResolutionStrategy(
+                        ResolutionStrategy(
+                            Size(1280, 720),
+                            ResolutionStrategy.FALLBACK_RULE_CLOSEST_HIGHER_THEN_LOWER
+                        )
+                    )
+                    .build()
+            )
             .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
             .setOutputImageFormat(ImageAnalysis.OUTPUT_IMAGE_FORMAT_YUV_420_888)
             .build()
@@ -275,6 +300,49 @@ private fun StatusBar(
                 fontWeight = FontWeight.Medium
             )
         }
+    }
+}
+
+// ── Scan Now button ────────────────────────────────────────────────────────
+
+@Composable
+private fun ScanNowButton(
+    isAnalysing: Boolean,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val infiniteTransition = rememberInfiniteTransition(label = "scanBtn")
+    val ringAlpha by infiniteTransition.animateFloat(
+        initialValue = 0.4f, targetValue = 0.9f,
+        animationSpec = infiniteRepeatable(
+            tween(900, easing = LinearEasing), RepeatMode.Reverse
+        ),
+        label = "ringAlpha"
+    )
+
+    Box(
+        modifier = modifier
+            .size(64.dp)
+            .clip(CircleShape)
+            .background(
+                if (isAnalysing) ScannerTeal.copy(alpha = 0.25f)
+                else Color.Black.copy(alpha = 0.55f)
+            )
+            .border(
+                width = 2.dp,
+                color = ScannerTeal.copy(alpha = if (isAnalysing) ringAlpha else 0.70f),
+                shape = CircleShape
+            )
+            .clickable(enabled = !isAnalysing, onClick = onClick),
+        contentAlignment = Alignment.Center
+    ) {
+        Text(
+            text = if (isAnalysing) "…" else "SCAN",
+            color = ScannerTeal,
+            fontSize = 11.sp,
+            fontWeight = FontWeight.Bold,
+            letterSpacing = 1.sp
+        )
     }
 }
 

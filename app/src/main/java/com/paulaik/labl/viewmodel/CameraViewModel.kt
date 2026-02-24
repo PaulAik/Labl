@@ -7,6 +7,7 @@ import com.paulaik.labl.api.ClaudeApiClient
 import com.paulaik.labl.data.ApiKeyStore
 import com.paulaik.labl.data.model.AnalysisResult
 import com.paulaik.labl.ml.SymbolAnalyzer
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -18,6 +19,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
 
     private val apiKeyStore = ApiKeyStore(application)
     private val apiClient = ClaudeApiClient()
+    private var analyzer: SymbolAnalyzer? = null
 
     // Exposed API key as state for the settings screen
     val apiKey: StateFlow<String> = apiKeyStore.apiKey.stateIn(
@@ -51,8 +53,17 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         onError = { msg ->
             _isAnalysing.value = false
             _errorMessage.value = msg
+            viewModelScope.launch {
+                delay(8_000)
+                _errorMessage.compareAndSet(msg, null)
+            }
         }
-    )
+    ).also { analyzer = it }
+
+    /** Force the next camera frame to be analysed immediately. */
+    fun triggerScan() {
+        analyzer?.triggerNow()
+    }
 
     fun saveApiKey(key: String) {
         viewModelScope.launch { apiKeyStore.save(key) }
