@@ -11,6 +11,7 @@ import androidx.camera.core.ImageAnalysis
 import androidx.camera.core.ImageProxy
 import com.paulaik.labl.api.ClaudeApiClient
 import com.paulaik.labl.data.model.AnalysisResult
+import com.paulaik.labl.data.model.SymbolLabel
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.launch
 import java.io.ByteArrayOutputStream
@@ -26,7 +27,9 @@ class SymbolAnalyzer(
     private val onAnalysing: () -> Unit,
     private val onResult: (AnalysisResult) -> Unit,
     private val onError: (String) -> Unit,
-    private val intervalMs: Long = 3_000L
+    private val intervalMs: Long = 3_000L,
+    /** Live-updated few-shot examples injected from the validated label store. */
+    private val examples: () -> List<SymbolLabel> = { emptyList() }
 ) : ImageAnalysis.Analyzer {
 
     @Volatile private var lastAnalysisTs = 0L
@@ -58,7 +61,7 @@ class SymbolAnalyzer(
             try {
                 onAnalysing()
                 val b64 = Base64.encodeToString(jpegBytes, Base64.NO_WRAP)
-                val result = apiClient.analyzeFrame(b64, apiKey())
+                val result = apiClient.analyzeFrame(b64, apiKey(), examples())
                 result
                     .onSuccess { onResult(it) }
                     .onFailure { onError(it.message ?: "Unknown error") }

@@ -53,6 +53,8 @@ func main() {
 	mux.HandleFunc("/classify", withCORS(classifyHandler))
 	mux.HandleFunc("/labels", withCORS(labelsHandler))
 	mux.HandleFunc("/labels/validate", withCORS(validateHandler))
+	mux.HandleFunc("/labels/examples", withCORS(examplesHandler))
+	mux.HandleFunc("/images", withCORS(imageProxyHandler))
 	mux.HandleFunc("/health", withCORS(healthHandler))
 
 	port := os.Getenv("PORT")
@@ -177,6 +179,67 @@ func validateHandler(w http.ResponseWriter, r *http.Request) {
 
 func healthHandler(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, map[string]string{"status": "ok"})
+}
+
+// ── /images?key={s3_key} ───────────────────────────────────────────────────
+// Proxies a JPEG from S3 so the Android app can display crops without
+// needing AWS credentials on the device.
+
+func imageProxyHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	key := r.URL.Query().Get("key")
+	if key == "" {
+		http.Error(w, "key query param required", http.StatusBadRequest)
+		return
+	}
+	data, err := getS3(key)
+	if err != nil {
+		log.Printf("image proxy s3 get %s: %v", key, err)
+		http.Error(w, "not found", http.StatusNotFound)
+		return
+	}
+	w.Header().Set("Content-Type", "image/jpeg")
+	w.Header().Set("Cache-Control", "max-age=86400")
+	w.Write(data)
+}
+
+// ── /labels/examples?category={cat}&limit={n} ─────────────────────────────
+// Returns up to N approved labels for the given category, formatted as
+// few-shot examples ready to embed in a Claude prompt.
+
+func examplesHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	category := strings.ToLower(r.URL.Query().Get("category"))
+	limitStr := r.URL.Query().Get("limit")
+	limit := 5
+	if n := 0; limitStr != "" {
+		fmt.Sscanf(limitStr, "%d", &n)
+		if n > 0 && n <= 20 {
+			limit = n
+		}
+	}
+
+	approved := store.query(1) // validated == 1
+	var examples []SymbolLabel
+	for _, l := range approved {
+		if category == "" || strings.EqualFold(l.Category, category) {
+			examples = append(examples, l)
+			if len(examples) >= limit {
+				break
+			}
+		}
+	}
+	if examples == nil {
+		examples = []SymbolLabel{}
+	}
+	writeJSON(w, examples)
 }
 
 func withCORS(next http.HandlerFunc) http.HandlerFunc {

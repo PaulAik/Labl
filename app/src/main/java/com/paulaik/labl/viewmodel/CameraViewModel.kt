@@ -4,10 +4,13 @@ import android.app.Application
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.paulaik.labl.api.ClaudeApiClient
+import com.paulaik.labl.api.LabelApiClient
 import com.paulaik.labl.data.ApiKeyStore
 import com.paulaik.labl.data.model.AnalysisResult
+import com.paulaik.labl.data.model.SymbolLabel
 import com.paulaik.labl.ml.SymbolAnalyzer
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -19,7 +22,24 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
 
     private val apiKeyStore = ApiKeyStore(application)
     private val apiClient = ClaudeApiClient()
+    private val labelApiClient = LabelApiClient()
     private var analyzer: SymbolAnalyzer? = null
+
+    /** Validated examples from the backend, refreshed every 5 minutes. */
+    private var cachedExamples: List<SymbolLabel> = emptyList()
+
+    init {
+        // Kick off example cache refresh in the background
+        viewModelScope.launch {
+            while (isActive) {
+                val url = backendUrl.value
+                if (url.isNotBlank()) {
+                    cachedExamples = labelApiClient.fetchExamples(url)
+                }
+                delay(5 * 60 * 1_000L) // refresh every 5 minutes
+            }
+        }
+    }
 
     val apiKey: StateFlow<String> = apiKeyStore.apiKey.stateIn(
         viewModelScope,
@@ -47,6 +67,7 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
         scope = viewModelScope,
         apiClient = apiClient,
         apiKey = { apiKey.value },
+        examples = { cachedExamples },
         onAnalysing = {
             _isAnalysing.value = true
             _errorMessage.value = null

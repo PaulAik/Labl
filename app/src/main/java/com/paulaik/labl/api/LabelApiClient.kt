@@ -34,6 +34,46 @@ class LabelApiClient {
             }
         }
 
+    /** Fetch raw JPEG bytes for a crop via the backend image proxy. */
+    suspend fun fetchImageBytes(backendUrl: String, s3Key: String): Result<ByteArray> =
+        withContext(Dispatchers.IO) {
+            try {
+                val url = "${backendUrl.trimEnd('/')}/images?key=${
+                    java.net.URLEncoder.encode(s3Key, "UTF-8")
+                }"
+                val req = Request.Builder().url(url).get().build()
+                val bytes = client.newCall(req).execute().use { it.body?.bytes() }
+                    ?: return@withContext Result.failure(Exception("Empty response"))
+                Result.success(bytes)
+            } catch (e: Exception) {
+                Log.e(TAG, "fetchImageBytes", e)
+                Result.failure(e)
+            }
+        }
+
+    /**
+     * Fetch approved labels to use as few-shot examples in the AR prompt.
+     * [category] filters by category (optional). Returns at most [limit] entries.
+     */
+    suspend fun fetchExamples(
+        backendUrl: String,
+        category: String = "",
+        limit: Int = 5
+    ): List<SymbolLabel> = withContext(Dispatchers.IO) {
+        try {
+            val cat = if (category.isNotBlank()) "&category=$category" else ""
+            val req = Request.Builder()
+                .url("${backendUrl.trimEnd('/')}/labels/examples?limit=$limit$cat")
+                .get()
+                .build()
+            val body = client.newCall(req).execute().use { it.body?.string() ?: "[]" }
+            parseLabels(body)
+        } catch (e: Exception) {
+            Log.e(TAG, "fetchExamples", e)
+            emptyList()
+        }
+    }
+
     suspend fun submitValidation(
         backendUrl: String,
         id: String,

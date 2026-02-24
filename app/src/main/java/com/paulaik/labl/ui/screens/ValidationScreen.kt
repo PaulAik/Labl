@@ -1,8 +1,10 @@
 package com.paulaik.labl.ui.screens
 
+import android.graphics.BitmapFactory
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.tween
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -12,6 +14,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -21,12 +24,15 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -34,14 +40,18 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -51,11 +61,17 @@ import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.paulaik.labl.data.model.SymbolLabel
 import com.paulaik.labl.ui.theme.ScannerTeal
+import com.paulaik.labl.viewmodel.ArTestResult
 import com.paulaik.labl.viewmodel.ValidationState
 import com.paulaik.labl.viewmodel.ValidationViewModel
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
-import kotlin.math.abs
+import kotlinx.coroutines.withContext
+import okhttp3.OkHttpClient
+import okhttp3.Request
+import java.net.URLEncoder
 import kotlin.math.roundToInt
+import kotlin.math.abs
 
 @Composable
 fun ValidationScreen(
@@ -69,6 +85,7 @@ fun ValidationScreen(
     }
 
     val state by vm.state.collectAsState()
+    val arTestResult by vm.arTestResult.collectAsState()
 
     Box(
         modifier = Modifier
@@ -100,7 +117,6 @@ fun ValidationScreen(
                     letterSpacing = 1.5.sp
                 )
                 Spacer(Modifier.weight(1f))
-                // Remaining count badge
                 val remaining = (state as? ValidationState.Ready)?.remaining ?: 0
                 if (remaining > 0) {
                     Box(
@@ -133,8 +149,10 @@ fun ValidationScreen(
                     is ValidationState.Error -> ErrorView(s.message, onRetry = vm::load)
                     is ValidationState.Ready -> SwipeCard(
                         label = s.current,
+                        backendUrl = backendUrl,
                         onApprove = { vm.decide(true) },
-                        onReject = { vm.decide(false) }
+                        onReject = { vm.decide(false) },
+                        onTestInAr = { vm.testCropInAR(s.current) }
                     )
                 }
             }
@@ -168,6 +186,14 @@ fun ValidationScreen(
                 }
             }
         }
+
+        // ── AR test result overlay ────────────────────────────────────
+        when (val r = arTestResult) {
+            is ArTestResult.Loading -> ArLoadingOverlay()
+            is ArTestResult.Done -> ArResultOverlay(result = r, onDismiss = vm::dismissArTest)
+            is ArTestResult.Error -> ArErrorOverlay(message = r.message, onDismiss = vm::dismissArTest)
+            ArTestResult.Idle -> Unit
+        }
     }
 }
 
@@ -176,17 +202,18 @@ fun ValidationScreen(
 @Composable
 private fun SwipeCard(
     label: SymbolLabel,
+    backendUrl: String,
     onApprove: () -> Unit,
-    onReject: () -> Unit
+    onReject: () -> Unit,
+    onTestInAr: () -> Unit
 ) {
     val scope = rememberCoroutineScope()
     val offsetX = remember { Animatable(0f) }
     val density = LocalDensity.current
     val swipeThresholdPx = with(density) { 120.dp.toPx() }
 
-    // Derive visual cues from drag position
     val fraction = (offsetX.value / swipeThresholdPx).coerceIn(-1f, 1f)
-    val approveAlpha = (fraction).coerceAtLeast(0f)
+    val approveAlpha = fraction.coerceAtLeast(0f)
     val rejectAlpha = (-fraction).coerceAtLeast(0f)
     val tiltDeg = fraction * 12f
 
@@ -202,18 +229,12 @@ private fun SwipeCard(
                         scope.launch {
                             when {
                                 offsetX.value > swipeThresholdPx -> {
-                                    offsetX.animateTo(
-                                        2000f,
-                                        tween(200, easing = FastOutSlowInEasing)
-                                    )
+                                    offsetX.animateTo(2000f, tween(200, easing = FastOutSlowInEasing))
                                     onApprove()
                                     offsetX.snapTo(0f)
                                 }
                                 offsetX.value < -swipeThresholdPx -> {
-                                    offsetX.animateTo(
-                                        -2000f,
-                                        tween(200, easing = FastOutSlowInEasing)
-                                    )
+                                    offsetX.animateTo(-2000f, tween(200, easing = FastOutSlowInEasing))
                                     onReject()
                                     offsetX.snapTo(0f)
                                 }
@@ -240,6 +261,20 @@ private fun SwipeCard(
     ) {
         Column(modifier = Modifier.padding(24.dp)) {
 
+            // Crop thumbnail
+            val cropKey = label.cropS3Key ?: label.s3Key
+            val imageUrl = "$backendUrl/images?key=${URLEncoder.encode(cropKey, "UTF-8")}"
+            RemoteImage(
+                url = imageUrl,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .aspectRatio(16f / 9f)
+                    .clip(RoundedCornerShape(12.dp))
+                    .background(Color(0xFF0F0F0F))
+            )
+
+            Spacer(Modifier.height(16.dp))
+
             // Category + confidence
             Row(verticalAlignment = Alignment.CenterVertically) {
                 CategoryBadge(label.category)
@@ -247,7 +282,7 @@ private fun SwipeCard(
                 ConfidenceDot(label.confidence)
             }
 
-            Spacer(Modifier.height(16.dp))
+            Spacer(Modifier.height(12.dp))
 
             // Symbol name
             Text(
@@ -268,7 +303,29 @@ private fun SwipeCard(
                 lineHeight = 22.sp
             )
 
-            Spacer(Modifier.height(20.dp))
+            Spacer(Modifier.height(16.dp))
+
+            // Test in AR button
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(10.dp))
+                    .background(ScannerTeal.copy(alpha = 0.10f))
+                    .border(1.dp, ScannerTeal.copy(alpha = 0.35f), RoundedCornerShape(10.dp))
+                    .clickable(onClick = onTestInAr)
+                    .padding(vertical = 10.dp),
+                contentAlignment = Alignment.Center
+            ) {
+                Text(
+                    text = "Test in AR  →",
+                    color = ScannerTeal,
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    letterSpacing = 0.5.sp
+                )
+            }
+
+            Spacer(Modifier.height(16.dp))
 
             // Meta
             Text(
@@ -278,7 +335,7 @@ private fun SwipeCard(
             )
         }
 
-        // Swipe hint overlays
+        // Swipe overlays
         if (approveAlpha > 0.05f) {
             Box(
                 modifier = Modifier
@@ -301,6 +358,252 @@ private fun SwipeCard(
                     .padding(horizontal = 12.dp, vertical = 6.dp)
             ) {
                 Text("✗  WRONG", color = Color.White, fontWeight = FontWeight.Bold, fontSize = 14.sp)
+            }
+        }
+    }
+}
+
+// ── Remote image loader ────────────────────────────────────────────────────
+
+private val httpClient = OkHttpClient()
+
+@Composable
+private fun RemoteImage(url: String, modifier: Modifier = Modifier) {
+    var bitmap by remember(url) { mutableStateOf<android.graphics.Bitmap?>(null) }
+    var failed by remember(url) { mutableStateOf(false) }
+
+    LaunchedEffect(url) {
+        bitmap = null
+        failed = false
+        withContext(Dispatchers.IO) {
+            try {
+                val req = Request.Builder().url(url).build()
+                val bytes = httpClient.newCall(req).execute().use { resp ->
+                    if (resp.isSuccessful) resp.body?.bytes() else null
+                }
+                if (bytes != null) {
+                    bitmap = BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
+                } else {
+                    failed = true
+                }
+            } catch (_: Exception) {
+                failed = true
+            }
+        }
+    }
+
+    Box(modifier = modifier, contentAlignment = Alignment.Center) {
+        when {
+            bitmap != null -> Image(
+                bitmap = bitmap!!.asImageBitmap(),
+                contentDescription = "Symbol crop",
+                contentScale = ContentScale.Fit,
+                modifier = Modifier.fillMaxSize()
+            )
+            failed -> Text(
+                text = "No image",
+                color = Color.White.copy(alpha = 0.25f),
+                fontSize = 11.sp
+            )
+            else -> CircularProgressIndicator(
+                color = ScannerTeal,
+                modifier = Modifier.size(24.dp),
+                strokeWidth = 2.dp
+            )
+        }
+    }
+}
+
+// ── AR test overlays ───────────────────────────────────────────────────────
+
+@Composable
+private fun ArLoadingOverlay() {
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Color.Black.copy(alpha = 0.75f)),
+        contentAlignment = Alignment.Center
+    ) {
+        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+            CircularProgressIndicator(color = ScannerTeal, modifier = Modifier.size(48.dp))
+            Spacer(Modifier.height(16.dp))
+            Text("Running AR scan…", color = Color.White.copy(alpha = 0.75f), fontSize = 14.sp)
+        }
+    }
+}
+
+@Composable
+private fun ArResultOverlay(result: ArTestResult.Done, onDismiss: () -> Unit) {
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Color.Black.copy(alpha = 0.80f))
+            .clickable(onClick = onDismiss),
+        contentAlignment = Alignment.BottomCenter
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp))
+                .background(Color(0xFF161616))
+                .padding(24.dp)
+                .navigationBarsPadding()
+                .clickable { /* consume so taps inside don't dismiss */ }
+                .verticalScroll(rememberScrollState())
+        ) {
+            // Handle
+            Box(
+                modifier = Modifier
+                    .width(40.dp)
+                    .height(4.dp)
+                    .clip(CircleShape)
+                    .background(Color.White.copy(alpha = 0.20f))
+                    .align(Alignment.CenterHorizontally)
+            )
+
+            Spacer(Modifier.height(20.dp))
+
+            Text(
+                text = "AR TEST RESULT",
+                color = ScannerTeal,
+                fontSize = 11.sp,
+                fontWeight = FontWeight.Bold,
+                letterSpacing = 1.5.sp
+            )
+
+            Spacer(Modifier.height(16.dp))
+
+            // Validated label row
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Box(
+                    modifier = Modifier
+                        .size(8.dp)
+                        .clip(CircleShape)
+                        .background(Color.White.copy(alpha = 0.40f))
+                )
+                Spacer(Modifier.width(8.dp))
+                Text("Validated label", color = Color.White.copy(alpha = 0.50f), fontSize = 12.sp)
+            }
+            Spacer(Modifier.height(4.dp))
+            Text(
+                text = result.labelName.ifBlank { "Unknown" },
+                color = Color.White,
+                fontSize = 17.sp,
+                fontWeight = FontWeight.Bold
+            )
+
+            Spacer(Modifier.height(20.dp))
+            HorizontalDivider(color = Color.White.copy(alpha = 0.08f))
+            Spacer(Modifier.height(20.dp))
+
+            // Claude's response
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Box(
+                    modifier = Modifier
+                        .size(8.dp)
+                        .clip(CircleShape)
+                        .background(ScannerTeal)
+                )
+                Spacer(Modifier.width(8.dp))
+                Text("Claude identified", color = Color.White.copy(alpha = 0.50f), fontSize = 12.sp)
+            }
+            Spacer(Modifier.height(8.dp))
+
+            if (result.arResult.symbols.isEmpty()) {
+                Text(
+                    text = "No symbols found in this crop.",
+                    color = Color.White.copy(alpha = 0.45f),
+                    fontSize = 14.sp,
+                    fontStyle = androidx.compose.ui.text.font.FontStyle.Italic
+                )
+            } else {
+                result.arResult.symbols.forEachIndexed { i, symbol ->
+                    if (i > 0) Spacer(Modifier.height(12.dp))
+
+                    // Match indicator
+                    val nameMatches = symbol.name.trim().equals(result.labelName.trim(), ignoreCase = true)
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(
+                            text = symbol.name,
+                            color = Color.White,
+                            fontSize = 16.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            modifier = Modifier.weight(1f)
+                        )
+                        if (nameMatches) {
+                            Box(
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(6.dp))
+                                    .background(ScannerTeal.copy(alpha = 0.15f))
+                                    .border(0.5.dp, ScannerTeal.copy(alpha = 0.50f), RoundedCornerShape(6.dp))
+                                    .padding(horizontal = 6.dp, vertical = 2.dp)
+                            ) {
+                                Text("MATCH", color = ScannerTeal, fontSize = 9.sp, fontWeight = FontWeight.Bold, letterSpacing = 0.8.sp)
+                            }
+                        } else {
+                            Box(
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(6.dp))
+                                    .background(Color(0xFFFF4B4B).copy(alpha = 0.12f))
+                                    .border(0.5.dp, Color(0xFFFF4B4B).copy(alpha = 0.40f), RoundedCornerShape(6.dp))
+                                    .padding(horizontal = 6.dp, vertical = 2.dp)
+                            ) {
+                                Text("DIFF", color = Color(0xFFFF4B4B), fontSize = 9.sp, fontWeight = FontWeight.Bold, letterSpacing = 0.8.sp)
+                            }
+                        }
+                    }
+                    Spacer(Modifier.height(4.dp))
+                    Text(
+                        text = symbol.meaning,
+                        color = Color.White.copy(alpha = 0.65f),
+                        fontSize = 13.sp,
+                        lineHeight = 20.sp
+                    )
+                    Text(
+                        text = symbol.category.displayName  +  "  •  " + symbol.confidence.name.lowercase().replaceFirstChar { it.uppercase() },
+                        color = Color.White.copy(alpha = 0.30f),
+                        fontSize = 11.sp,
+                        modifier = Modifier.padding(top = 4.dp)
+                    )
+                }
+            }
+
+            Spacer(Modifier.height(28.dp))
+
+            TextButton(
+                onClick = onDismiss,
+                modifier = Modifier.align(Alignment.CenterHorizontally)
+            ) {
+                Text("Dismiss", color = ScannerTeal, fontSize = 14.sp)
+            }
+        }
+    }
+}
+
+@Composable
+private fun ArErrorOverlay(message: String, onDismiss: () -> Unit) {
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Color.Black.copy(alpha = 0.75f))
+            .clickable(onClick = onDismiss),
+        contentAlignment = Alignment.BottomCenter
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp))
+                .background(Color(0xFF1A0F0F))
+                .padding(24.dp)
+                .navigationBarsPadding()
+                .clickable { }
+        ) {
+            Text("⚠️  AR test failed", color = Color(0xFFFF4B4B), fontSize = 15.sp, fontWeight = FontWeight.Bold)
+            Spacer(Modifier.height(8.dp))
+            Text(message.take(200), color = Color.White.copy(alpha = 0.60f), fontSize = 13.sp, lineHeight = 20.sp)
+            Spacer(Modifier.height(20.dp))
+            TextButton(onClick = onDismiss) {
+                Text("Dismiss", color = Color(0xFFFF4B4B))
             }
         }
     }
@@ -396,12 +699,7 @@ private fun EmptyView(onRefresh: () -> Unit) {
     ) {
         Text("✅", fontSize = 48.sp)
         Spacer(Modifier.height(16.dp))
-        Text(
-            "All done!",
-            color = Color.White,
-            fontSize = 20.sp,
-            fontWeight = FontWeight.Bold
-        )
+        Text("All done!", color = Color.White, fontSize = 20.sp, fontWeight = FontWeight.Bold)
         Spacer(Modifier.height(8.dp))
         Text(
             "No pending labels to validate.\nCollect more training data or wait for the backend to process images.",
