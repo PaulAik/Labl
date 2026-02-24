@@ -38,6 +38,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AddAPhoto
+import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -104,6 +105,7 @@ private fun LiveViewScreen(vm: CameraViewModel) {
     var selectedSymbol by remember { mutableStateOf<Symbol?>(null) }
     var showSettings by remember { mutableStateOf(apiKey.isBlank()) }
     var showTraining by remember { mutableStateOf(false) }
+    var showValidation by remember { mutableStateOf(false) }
 
     // Build analyzer once; it references the latest apiKey via lambda
     val analyzer = remember { vm.buildAnalyzer() }
@@ -132,6 +134,7 @@ private fun LiveViewScreen(vm: CameraViewModel) {
         TopBar(
             onSettingsTapped = { showSettings = true },
             onTrainingTapped = { showTraining = true },
+            onValidationTapped = { showValidation = true },
             modifier = Modifier
                 .align(Alignment.TopCenter)
                 .fillMaxWidth()
@@ -185,6 +188,13 @@ private fun LiveViewScreen(vm: CameraViewModel) {
             onDismiss = { showTraining = false }
         )
     }
+
+    if (showValidation) {
+        ValidationScreen(
+            backendUrl = backendUrl,
+            onDismiss = { showValidation = false }
+        )
+    }
 }
 
 // ── CameraX setup helper ───────────────────────────────────────────────────
@@ -235,6 +245,7 @@ private fun startCamera(
 private fun TopBar(
     onSettingsTapped: () -> Unit,
     onTrainingTapped: () -> Unit,
+    onValidationTapped: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     Row(
@@ -257,6 +268,13 @@ private fun TopBar(
                     imageVector = Icons.Default.AddAPhoto,
                     contentDescription = "Collect training data",
                     tint = ScannerTeal.copy(alpha = 0.85f)
+                )
+            }
+            IconButton(onClick = onValidationTapped) {
+                Icon(
+                    imageVector = Icons.Default.CheckCircle,
+                    contentDescription = "Validate labels",
+                    tint = Color(0xFF4CAF50).copy(alpha = 0.85f)
                 )
             }
             IconButton(onClick = onSettingsTapped) {
