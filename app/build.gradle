@@ -99,6 +99,9 @@ dependencies {
     implementation 'org.jetbrains.kotlinx:kotlinx-serialization-json:1.7.0'
     implementation 'org.jetbrains.kotlin:kotlin-serialization:1.9.24'
 
+    // On-device ML — TFLite interpreter for MobileNet V2 embedding
+    implementation 'org.tensorflow:tensorflow-lite:2.14.0'
+
     // Coroutines
     implementation 'org.jetbrains.kotlinx:kotlinx-coroutines-android:1.8.1'
 
