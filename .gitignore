@@ -1,16 +1,33 @@
-*.iml
-.gradle
-/local.properties
-/.idea
-.DS_Store
+# Built application files
+*.apk
+*.aab
+
+# Files for the ART/Dalvik VM
+*.dex
+
+# Built outputs
 /build
+app/build
+
+# IDE files
+.idea
+*.iml
+
+# Gradle files
+.gradle
+
+# Local configuration
+/local.properties
+
+# Keystore files
+*.jks
+*.keystore
+
+# Google services
+google-services.json
+
+# Miscellaneous
+.DS_Store
 /captures
 .externalNativeBuild
 .cxx
-*.keystore
-!debug.keystore
-google-services.json
-
-# Go build artifacts
-/backend/labl-backend
-backend/labels.json
