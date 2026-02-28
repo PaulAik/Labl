@@ -6,6 +6,8 @@ import android.util.Size
 import androidx.camera.core.CameraSelector
 import androidx.camera.core.ImageAnalysis
 import androidx.camera.core.Preview
+import androidx.camera.core.resolutionselector.ResolutionSelector
+import androidx.camera.core.resolutionselector.ResolutionStrategy
 import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.camera.view.PreviewView
 import androidx.compose.animation.AnimatedVisibility
@@ -18,6 +20,8 @@ import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -25,6 +29,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
@@ -32,6 +37,8 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.AddAPhoto
+import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -93,9 +100,12 @@ private fun LiveViewScreen(vm: CameraViewModel) {
     val isAnalysing by vm.isAnalysing.collectAsState()
     val errorMessage by vm.errorMessage.collectAsState()
     val apiKey by vm.apiKey.collectAsState()
+    val backendUrl by vm.backendUrl.collectAsState()
 
     var selectedSymbol by remember { mutableStateOf<Symbol?>(null) }
     var showSettings by remember { mutableStateOf(apiKey.isBlank()) }
+    var showTraining by remember { mutableStateOf(false) }
+    var showValidation by remember { mutableStateOf(false) }
 
     // Build analyzer once; it references the latest apiKey via lambda
     val analyzer = remember { vm.buildAnalyzer() }
@@ -123,10 +133,22 @@ private fun LiveViewScreen(vm: CameraViewModel) {
         // ── Top bar ─────────────────────────────────────────────────
         TopBar(
             onSettingsTapped = { showSettings = true },
+            onTrainingTapped = { showTraining = true },
+            onValidationTapped = { showValidation = true },
             modifier = Modifier
                 .align(Alignment.TopCenter)
                 .fillMaxWidth()
                 .statusBarsPadding()
+        )
+
+        // ── Scan Now button ─────────────────────────────────────────
+        ScanNowButton(
+            isAnalysing = isAnalysing,
+            onClick = { vm.triggerScan() },
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .navigationBarsPadding()
+                .padding(bottom = 88.dp)
         )
 
         // ── Status bar at bottom ────────────────────────────────────
@@ -137,23 +159,44 @@ private fun LiveViewScreen(vm: CameraViewModel) {
             modifier = Modifier
                 .align(Alignment.BottomCenter)
                 .fillMaxWidth()
-                .padding(bottom = 32.dp, start = 20.dp, end = 20.dp)
+                .navigationBarsPadding()
+                .padding(bottom = 24.dp, start = 20.dp, end = 20.dp)
         )
     }
 
     // ── Modals ───────────────────────────────────────────────────────
     selectedSymbol?.let { sym ->
-        SymbolDetailSheet(symbol = sym, onDismiss = { selectedSymbol = null })
+        SymbolDetailSheet(
+            symbol = sym,
+            onDismiss = { selectedSymbol = null },
+            onValidate = { approved -> vm.submitFeedback(sym, approved) }
+        )
     }
 
     if (showSettings) {
         SettingsSheet(
             currentKey = apiKey,
-            onSave = { key ->
+            currentBackendUrl = backendUrl,
+            onSave = { key, url ->
                 vm.saveApiKey(key)
+                vm.saveBackendUrl(url)
                 showSettings = false
             },
             onDismiss = { showSettings = false }
+        )
+    }
+
+    if (showTraining) {
+        TrainingScreen(
+            backendUrl = backendUrl,
+            onDismiss = { showTraining = false }
+        )
+    }
+
+    if (showValidation) {
+        ValidationScreen(
+            backendUrl = backendUrl,
+            onDismiss = { showValidation = false }
         )
     }
 }
@@ -175,7 +218,16 @@ private fun startCamera(
         }
 
         val imageAnalysis = ImageAnalysis.Builder()
-            .setTargetResolution(Size(1280, 720))
+            .setResolutionSelector(
+                ResolutionSelector.Builder()
+                    .setResolutionStrategy(
+                        ResolutionStrategy(
+                            Size(1280, 720),
+                            ResolutionStrategy.FALLBACK_RULE_CLOSEST_HIGHER_THEN_LOWER
+                        )
+                    )
+                    .build()
+            )
             .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
             .setOutputImageFormat(ImageAnalysis.OUTPUT_IMAGE_FORMAT_YUV_420_888)
             .build()
@@ -194,7 +246,12 @@ private fun startCamera(
 // ── Top bar ────────────────────────────────────────────────────────────────
 
 @Composable
-private fun TopBar(onSettingsTapped: () -> Unit, modifier: Modifier = Modifier) {
+private fun TopBar(
+    onSettingsTapped: () -> Unit,
+    onTrainingTapped: () -> Unit,
+    onValidationTapped: () -> Unit,
+    modifier: Modifier = Modifier
+) {
     Row(
         modifier = modifier
             .background(Color.Black.copy(alpha = 0.45f))
@@ -209,12 +266,28 @@ private fun TopBar(onSettingsTapped: () -> Unit, modifier: Modifier = Modifier) 
             fontSize = 22.sp,
             letterSpacing = 4.sp
         )
-        IconButton(onClick = onSettingsTapped) {
-            Icon(
-                imageVector = Icons.Default.Settings,
-                contentDescription = "Settings",
-                tint = Color.White.copy(alpha = 0.80f)
-            )
+        Row {
+            IconButton(onClick = onTrainingTapped) {
+                Icon(
+                    imageVector = Icons.Default.AddAPhoto,
+                    contentDescription = "Collect training data",
+                    tint = ScannerTeal.copy(alpha = 0.85f)
+                )
+            }
+            IconButton(onClick = onValidationTapped) {
+                Icon(
+                    imageVector = Icons.Default.CheckCircle,
+                    contentDescription = "Validate labels",
+                    tint = Color(0xFF4CAF50).copy(alpha = 0.85f)
+                )
+            }
+            IconButton(onClick = onSettingsTapped) {
+                Icon(
+                    imageVector = Icons.Default.Settings,
+                    contentDescription = "Settings",
+                    tint = Color.White.copy(alpha = 0.80f)
+                )
+            }
         }
     }
 }
@@ -275,6 +348,49 @@ private fun StatusBar(
                 fontWeight = FontWeight.Medium
             )
         }
+    }
+}
+
+// ── Scan Now button ────────────────────────────────────────────────────────
+
+@Composable
+private fun ScanNowButton(
+    isAnalysing: Boolean,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val infiniteTransition = rememberInfiniteTransition(label = "scanBtn")
+    val ringAlpha by infiniteTransition.animateFloat(
+        initialValue = 0.4f, targetValue = 0.9f,
+        animationSpec = infiniteRepeatable(
+            tween(900, easing = LinearEasing), RepeatMode.Reverse
+        ),
+        label = "ringAlpha"
+    )
+
+    Box(
+        modifier = modifier
+            .size(64.dp)
+            .clip(CircleShape)
+            .background(
+                if (isAnalysing) ScannerTeal.copy(alpha = 0.25f)
+                else Color.Black.copy(alpha = 0.55f)
+            )
+            .border(
+                width = 2.dp,
+                color = ScannerTeal.copy(alpha = if (isAnalysing) ringAlpha else 0.70f),
+                shape = CircleShape
+            )
+            .clickable(enabled = !isAnalysing, onClick = onClick),
+        contentAlignment = Alignment.Center
+    ) {
+        Text(
+            text = if (isAnalysing) "…" else "SCAN",
+            color = ScannerTeal,
+            fontSize = 11.sp,
+            fontWeight = FontWeight.Bold,
+            letterSpacing = 1.sp
+        )
     }
 }
 

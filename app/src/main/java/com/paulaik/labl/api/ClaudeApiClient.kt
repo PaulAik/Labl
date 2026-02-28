@@ -5,6 +5,7 @@ import com.paulaik.labl.data.model.AnalysisResult
 import com.paulaik.labl.data.model.Confidence
 import com.paulaik.labl.data.model.Symbol
 import com.paulaik.labl.data.model.SymbolCategory
+import com.paulaik.labl.data.model.SymbolLabel
 import com.paulaik.labl.data.model.SymbolPosition
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -24,15 +25,18 @@ class ClaudeApiClient {
         .readTimeout(60, TimeUnit.SECONDS)
         .build()
 
-    suspend fun analyzeFrame(base64Jpeg: String, apiKey: String): Result<AnalysisResult> =
-        withContext(Dispatchers.IO) {
+    suspend fun analyzeFrame(
+        base64Jpeg: String,
+        apiKey: String,
+        fewShotExamples: List<SymbolLabel> = emptyList()
+    ): Result<AnalysisResult> = withContext(Dispatchers.IO) {
             if (apiKey.isBlank()) {
                 return@withContext Result.failure(
                     IllegalStateException("No API key configured. Open Settings to add your Claude API key.")
                 )
             }
 
-            val body = buildRequestJson(base64Jpeg)
+            val body = buildRequestJson(base64Jpeg, fewShotExamples)
 
             val request = Request.Builder()
                 .url("https://api.anthropic.com/v1/messages")
@@ -57,7 +61,10 @@ class ClaudeApiClient {
             }
         }
 
-    private fun buildRequestJson(base64Jpeg: String): JSONObject {
+    private fun buildRequestJson(
+        base64Jpeg: String,
+        fewShotExamples: List<SymbolLabel> = emptyList()
+    ): JSONObject {
         val imageContent = JSONObject()
             .put("type", "image")
             .put(
@@ -67,16 +74,26 @@ class ClaudeApiClient {
                     .put("data", base64Jpeg)
             )
 
+        val prompt = if (fewShotExamples.isEmpty()) PROMPT else buildString {
+            append(PROMPT)
+            append("\n\nHere are some examples from your own validated symbol library:\n")
+            fewShotExamples.forEachIndexed { i, ex ->
+                append("${i + 1}. name=\"${ex.name}\" category=${ex.category} " +
+                    "description=\"${ex.description}\"\n")
+            }
+            append("\nUse these as reference when identifying similar symbols.")
+        }
+
         val textContent = JSONObject()
             .put("type", "text")
-            .put("text", PROMPT)
+            .put("text", prompt)
 
         val message = JSONObject()
             .put("role", "user")
             .put("content", JSONArray().put(imageContent).put(textContent))
 
         return JSONObject()
-            .put("model", "claude-opus-4-5")
+            .put("model", "claude-haiku-3-5")
             .put("max_tokens", 1024)
             .put("messages", JSONArray().put(message))
     }
@@ -90,8 +107,9 @@ class ClaudeApiClient {
 
         Log.d(TAG, "Claude response: $text")
 
-        // Extract the JSON block from the response
-        val jsonBlock = Regex("""\{[\s\S]*\}""").find(text)?.value
+        // Extract the JSON block – handle both raw JSON and markdown code fences
+        val jsonBlock = Regex("""```(?:json)?\s*(\{[\s\S]*?\})\s*```""").find(text)?.groupValues?.get(1)
+            ?: Regex("""\{[\s\S]*\}""").find(text)?.value
             ?: return AnalysisResult(emptyList())
 
         val parsed = JSONObject(jsonBlock)

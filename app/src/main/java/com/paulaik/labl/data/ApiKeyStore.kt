@@ -15,6 +15,7 @@ private val Context.dataStore: DataStore<Preferences> by preferencesDataStore(na
 class ApiKeyStore(private val context: Context) {
 
     private val KEY = stringPreferencesKey("claude_api_key")
+    private val BACKEND_URL_KEY = stringPreferencesKey("backend_url")
 
     /** Emits the stored key, falling back to the build-time key from local.properties. */
     val apiKey: Flow<String> = context.dataStore.data.map { prefs ->
@@ -22,8 +23,18 @@ class ApiKeyStore(private val context: Context) {
             ?: BuildConfig.CLAUDE_API_KEY
     }
 
+    /** Emits the stored backend URL (defaults to localhost for emulator). */
+    val backendUrl: Flow<String> = context.dataStore.data.map { prefs ->
+        prefs[BACKEND_URL_KEY]?.takeIf { it.isNotBlank() }
+            ?: "http://10.0.2.2:8080"
+    }
+
     suspend fun save(key: String) {
         context.dataStore.edit { it[KEY] = key.trim() }
+    }
+
+    suspend fun saveBackendUrl(url: String) {
+        context.dataStore.edit { it[BACKEND_URL_KEY] = url.trim() }
     }
 
     suspend fun clear() {
