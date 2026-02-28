@@ -74,6 +74,35 @@ class LabelApiClient {
         }
     }
 
+    /** Submit live AR classification feedback. The label is stored as immediately validated. */
+    suspend fun submitLiveFeedback(
+        backendUrl: String,
+        name: String,
+        category: String,
+        description: String,
+        confidence: String,
+        approved: Boolean
+    ): Result<Unit> = withContext(Dispatchers.IO) {
+        try {
+            val json = JSONObject().apply {
+                put("name", name)
+                put("category", category)
+                put("description", description)
+                put("confidence", confidence)
+                put("approved", approved)
+            }.toString()
+            val req = Request.Builder()
+                .url("${backendUrl.trimEnd('/')}/labels/feedback")
+                .post(json.toRequestBody("application/json".toMediaType()))
+                .build()
+            client.newCall(req).execute().close()
+            Result.success(Unit)
+        } catch (e: Exception) {
+            Log.e(TAG, "submitLiveFeedback", e)
+            Result.failure(e)
+        }
+    }
+
     suspend fun submitValidation(
         backendUrl: String,
         id: String,

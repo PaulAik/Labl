@@ -166,7 +166,11 @@ private fun LiveViewScreen(vm: CameraViewModel) {
 
     // ── Modals ───────────────────────────────────────────────────────
     selectedSymbol?.let { sym ->
-        SymbolDetailSheet(symbol = sym, onDismiss = { selectedSymbol = null })
+        SymbolDetailSheet(
+            symbol = sym,
+            onDismiss = { selectedSymbol = null },
+            onValidate = { approved -> vm.submitFeedback(sym, approved) }
+        )
     }
 
     if (showSettings) {

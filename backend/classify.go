@@ -8,7 +8,6 @@ import (
 	"image"
 	"image/draw"
 	"image/jpeg"
-	_ "image/jpeg"
 	"log"
 	"net/http"
 	"strings"
@@ -32,7 +31,7 @@ type claudeSymbol struct {
 // classifyAndStore sends imgBytes to Claude, crops each detected symbol, and
 // stores everything in SQLite + S3. Runs in a goroutine.
 func classifyAndStore(sessionID, applianceType, origS3Key string, imgBytes []byte) {
-	symbols, err := callClaudeClassify(imgBytes)
+	symbols, err := callClaudeClassify(imgBytes, applianceType)
 	if err != nil {
 		log.Printf("classify error for %s: %v", origS3Key, err)
 		return
@@ -64,12 +63,19 @@ func classifyAndStore(sessionID, applianceType, origS3Key string, imgBytes []byt
 }
 
 // callClaudeClassify sends an image to Claude and parses the returned symbols.
-func callClaudeClassify(imgBytes []byte) ([]claudeSymbol, error) {
+// applianceType is optional; when non-empty and not "unknown" it is included in
+// the prompt so Claude can apply domain-specific knowledge.
+func callClaudeClassify(imgBytes []byte, applianceType string) ([]claudeSymbol, error) {
 	b64 := base64.StdEncoding.EncodeToString(imgBytes)
 
-	prompt := `Analyse this appliance control panel image.
+	context := ""
+	if applianceType != "" && applianceType != "unknown" {
+		context = fmt.Sprintf("\nThis image is from a %s appliance — use this context to improve accuracy.\n", applianceType)
+	}
 
-For every distinct symbol or icon visible, return exactly this JSON structure with no additional prose:
+	prompt := `You are analysing an appliance control panel or care-label image.` + context + `
+
+Identify every distinct symbol or icon visible and return ONLY the following JSON — no markdown, no prose:
 {
   "symbols": [
     {
@@ -77,20 +83,28 @@ For every distinct symbol or icon visible, return exactly this JSON structure wi
       "description": "plain-English explanation of what the symbol means and what the user should do",
       "category": "washing | drying | ironing | bleaching | dishwasher | oven | other",
       "confidence": "high | medium | low",
-      "crop_x": 0.0,
-      "crop_y": 0.0,
-      "crop_w": 0.0,
-      "crop_h": 0.0
+      "crop_x": <left edge fraction>,
+      "crop_y": <top edge fraction>,
+      "crop_w": <width fraction>,
+      "crop_h": <height fraction>
     }
   ]
 }
 
-crop_x/y are the top-left corner; crop_w/h are width and height — all as fractions of the image dimensions (0.0 to 1.0).
-Give tight bounding boxes so each symbol can be extracted individually.
-Return ONLY the JSON.`
+Bounding box rules — read carefully:
+- The origin (0, 0) is the TOP-LEFT corner of the image; x increases rightward, y increases downward.
+- crop_x: fraction of image width from the left edge to the LEFT side of the symbol.
+- crop_y: fraction of image height from the top edge to the TOP side of the symbol.
+- crop_w: width of the bounding box as a fraction of image width.
+- crop_h: height of the bounding box as a fraction of image height.
+- All values are in [0.0, 1.0]. crop_x + crop_w ≤ 1.0 and crop_y + crop_h ≤ 1.0.
+- Make boxes GENEROUS — include ~10 % padding around each symbol so nothing is clipped.
+- Example: a symbol in the upper-left quarter might be crop_x=0.02, crop_y=0.03, crop_w=0.28, crop_h=0.22.
+
+Return ONLY the JSON object.`
 
 	reqBody := map[string]any{
-		"model":      "claude-haiku-3-5",
+		"model":      "claude-sonnet-4-6",
 		"max_tokens": 2048,
 		"messages": []map[string]any{
 			{
@@ -127,6 +141,16 @@ Return ONLY the JSON.`
 	}
 	defer resp.Body.Close()
 
+	if resp.StatusCode != http.StatusOK {
+		var apiErr struct {
+			Error struct {
+				Message string `json:"message"`
+			} `json:"error"`
+		}
+		_ = json.NewDecoder(resp.Body).Decode(&apiErr)
+		return nil, fmt.Errorf("claude API %d: %s", resp.StatusCode, apiErr.Error.Message)
+	}
+
 	var apiResp struct {
 		Content []struct {
 			Type string `json:"type"`
@@ -136,6 +160,8 @@ Return ONLY the JSON.`
 	if err := json.NewDecoder(resp.Body).Decode(&apiResp); err != nil {
 		return nil, fmt.Errorf("decode: %w", err)
 	}
+
+	log.Printf("Claude response: %+v", apiResp)
 
 	for _, block := range apiResp.Content {
 		if block.Type != "text" {
@@ -173,10 +199,15 @@ func uploadCrop(imgBytes []byte, sym claudeSymbol, origKey, labelID string) stri
 	W := float64(b.Dx())
 	H := float64(b.Dy())
 
-	x0 := clampInt(int(sym.CropX*W), 0, b.Dx())
-	y0 := clampInt(int(sym.CropY*H), 0, b.Dy())
-	x1 := clampInt(int((sym.CropX+sym.CropW)*W), 0, b.Dx())
-	y1 := clampInt(int((sym.CropY+sym.CropH)*H), 0, b.Dy())
+	// Expand the model's bounding box by 15 % on every side to compensate for
+	// any coordinate imprecision. Clamped so we never exceed the image bounds.
+	const pad = 0.15
+	padX := sym.CropW * pad
+	padY := sym.CropH * pad
+	x0 := clampInt(int((sym.CropX-padX)*W), 0, b.Dx())
+	y0 := clampInt(int((sym.CropY-padY)*H), 0, b.Dy())
+	x1 := clampInt(int((sym.CropX+sym.CropW+padX)*W), 0, b.Dx())
+	y1 := clampInt(int((sym.CropY+sym.CropH+padY)*H), 0, b.Dy())
 
 	if x1-x0 < 4 || y1-y0 < 4 {
 		log.Printf("crop region too small for %s (%dx%d)", labelID, x1-x0, y1-y0)
@@ -197,8 +228,8 @@ func uploadCrop(imgBytes []byte, sym claudeSymbol, origKey, labelID string) stri
 	dir := origKey[:strings.LastIndex(origKey, "/")+1]
 	cropKey := dir + "crops/" + labelID + ".jpg"
 
-	if err := putS3(cropKey, buf.Bytes()); err != nil {
-		log.Printf("crop s3 put error %s: %v", labelID, err)
+	if err := objects.Put(cropKey, buf.Bytes()); err != nil {
+		log.Printf("crop store put error %s: %v", labelID, err)
 		return ""
 	}
 	return cropKey

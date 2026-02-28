@@ -37,6 +37,14 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
     // ── Few-shot examples from validated label store ──────────────────────
     private var cachedExamples: List<SymbolLabel> = emptyList()
 
+    val apiKey: StateFlow<String> = apiKeyStore.apiKey.stateIn(
+        viewModelScope, SharingStarted.WhileSubscribed(5_000), ""
+    )
+
+    val backendUrl: StateFlow<String> = apiKeyStore.backendUrl.stateIn(
+        viewModelScope, SharingStarted.WhileSubscribed(5_000), "http://10.0.2.2:8080"
+    )
+
     init {
         // Load persisted embeddings then download/initialise the model
         viewModelScope.launch {
@@ -58,14 +66,6 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
             }
         }
     }
-
-    val apiKey: StateFlow<String> = apiKeyStore.apiKey.stateIn(
-        viewModelScope, SharingStarted.WhileSubscribed(5_000), ""
-    )
-
-    val backendUrl: StateFlow<String> = apiKeyStore.backendUrl.stateIn(
-        viewModelScope, SharingStarted.WhileSubscribed(5_000), "http://10.0.2.2:8080"
-    )
 
     private val _analysisResult = MutableStateFlow<AnalysisResult?>(null)
     val analysisResult: StateFlow<AnalysisResult?> = _analysisResult.asStateFlow()
@@ -104,6 +104,27 @@ class CameraViewModel(application: Application) : AndroidViewModel(application) 
 
     /** Force the next camera frame to be analysed immediately. */
     fun triggerScan() { analyzer?.triggerNow() }
+
+    /** Submit a thumbs-up/down for a live AR classification result. */
+    fun submitFeedback(symbol: com.paulaik.labl.data.model.Symbol, approved: Boolean) {
+        val url = backendUrl.value
+        if (url.isBlank()) return
+        viewModelScope.launch {
+            labelApiClient.submitLiveFeedback(
+                backendUrl  = url,
+                name        = symbol.name,
+                category    = symbol.category.name.lowercase(),
+                description = symbol.meaning,
+                confidence  = symbol.confidence.name.lowercase(),
+                approved    = approved
+            ).onFailure { e ->
+                val msg = "Feedback failed: ${e.message?.take(40)}"
+                _errorMessage.value = msg
+                delay(5_000)
+                _errorMessage.compareAndSet(msg, null)
+            }
+        }
+    }
 
     fun saveApiKey(key: String)     { viewModelScope.launch { apiKeyStore.save(key) } }
     fun saveBackendUrl(url: String) { viewModelScope.launch { apiKeyStore.saveBackendUrl(url) } }

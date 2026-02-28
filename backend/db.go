@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"log"
 	"os"
+	"sort"
 	"sync"
 	"time"
 )
@@ -50,6 +51,16 @@ func initStore(path string) error {
 
 func (s *labelStore) insert(l SymbolLabel) {
 	l.CreatedAt = time.Now().Unix()
+	l.Validated = 0 // always pending from classify pipeline
+	s.mu.Lock()
+	s.labels = append(s.labels, l)
+	s.mu.Unlock()
+	s.flush()
+}
+
+// insertValidated stores a label preserving its Validated value (used for live feedback).
+func (s *labelStore) insertValidated(l SymbolLabel) {
+	l.CreatedAt = time.Now().Unix()
 	s.mu.Lock()
 	s.labels = append(s.labels, l)
 	s.mu.Unlock()
@@ -69,6 +80,63 @@ func (s *labelStore) query(validated int) []SymbolLabel {
 		out = []SymbolLabel{}
 	}
 	return out
+}
+
+// querySimilar returns up to limit non-rejected labels that have a crop image
+// and match category. When applianceType is non-empty and not "unknown", it
+// further filters to that appliance type. Approved labels are returned first.
+func (s *labelStore) querySimilar(category, applianceType string, limit int) []SymbolLabel {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	var out []SymbolLabel
+	for _, l := range s.labels {
+		if l.Validated == -1 { // skip rejected
+			continue
+		}
+		if l.CropS3Key == nil { // need a crop thumbnail
+			continue
+		}
+		if l.Category != category {
+			continue
+		}
+		if applianceType != "" && applianceType != "unknown" &&
+			l.ApplianceType != "" && l.ApplianceType != "unknown" &&
+			l.ApplianceType != applianceType {
+			continue
+		}
+		out = append(out, l)
+	}
+	// approved (1) before pending (0), newest first within each group
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].Validated != out[j].Validated {
+			return out[i].Validated > out[j].Validated
+		}
+		return out[i].CreatedAt > out[j].CreatedAt
+	})
+	if len(out) > limit {
+		out = out[:limit]
+	}
+	if out == nil {
+		out = []SymbolLabel{}
+	}
+	return out
+}
+
+func (s *labelStore) updateFields(id, name, description string) int {
+	s.mu.Lock()
+	n := 0
+	for i := range s.labels {
+		if s.labels[i].ID == id {
+			s.labels[i].Name = name
+			s.labels[i].Description = description
+			n++
+		}
+	}
+	s.mu.Unlock()
+	if n > 0 {
+		s.flush()
+	}
+	return n
 }
 
 func (s *labelStore) setValidated(id string, val int) int {
